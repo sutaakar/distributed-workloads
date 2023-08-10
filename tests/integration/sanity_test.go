@@ -30,6 +30,8 @@ import (
 func TestMcadReadyStatus(t *testing.T) {
 	test := support.With(t)
 
+	// Comment
+
 	mcad, err := test.Client().CodeFlare().CodeflareV1alpha1().MCADs(GetOpenDataHubNamespace()).Get(test.Ctx(), "mcad", metav1.GetOptions{})
 	test.Expect(err).NotTo(HaveOccurred())
 
