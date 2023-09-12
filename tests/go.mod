@@ -3,7 +3,7 @@ module github.com/opendatahub-io/distributed-workloads/tests/new-tests
 require (
 	github.com/onsi/gomega v1.27.10
 	github.com/openshift/api v0.0.0-20230718161610-2a3e8b481cec
-	github.com/project-codeflare/codeflare-operator v0.2.3
+	github.com/project-codeflare/codeflare-operator v0.2.0
 	github.com/ray-project/kuberay/ray-operator v0.0.0-20230908233208-a8f730e5a2b6
 	k8s.io/api v0.27.2
 	k8s.io/apimachinery v0.27.2
