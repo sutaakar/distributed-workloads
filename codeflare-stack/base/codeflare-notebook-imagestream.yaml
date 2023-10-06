@@ -1,7 +1,7 @@
 kind: ImageStream
 apiVersion: image.openshift.io/v1
 metadata:
-  name: codeflare-notebook
+  name: codeflare-notebook2
   labels:
     opendatahub.io/notebook-image: 'true'
   annotations:
