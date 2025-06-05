@@ -51,6 +51,14 @@ ENV CUDA_HOME="/usr/local/cuda" \
  PATH="/usr/local/nvidia/bin:${CUDA_HOME}/bin:${PATH}" \
  LD_LIBRARY_PATH="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$CUDA_HOME/lib64:$CUDA_HOME/extras/CUPTI/lib64:$LD_LIBRARY_PATH"
 
+# Print CUDA and environment information
+RUN echo "=== CUDA Environment Information ===" && \
+    echo "CUDA Version: ${CUDA_VERSION}" && \
+    echo "CUDA Home: ${CUDA_HOME}" && \
+    echo "NVIDIA Driver Capabilities: ${NVIDIA_DRIVER_CAPABILITIES}" && \
+    echo "NVIDIA Visible Devices: ${NVIDIA_VISIBLE_DEVICES}" && \
+    echo "==================================="
+
 # Install InfiniBand and RDMA packages
 RUN dnf config-manager \
         --add-repo https://linux.mellanox.com/public/repo/mlnx_ofed/latest/rhel9.5/mellanox_mlnx_ofed.repo \

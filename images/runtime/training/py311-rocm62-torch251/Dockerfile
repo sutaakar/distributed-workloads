@@ -50,6 +50,14 @@ EOF
 
 RUN dnf install -y cmake rocm-developer-tools rocm-ml-sdk rocm-opencl-sdk rocm-openmp-sdk rocm-utils && dnf clean all && rm -rf /var/cache/dnf
 
+# Display ROCm environment information
+RUN echo "=== ROCm Environment Information ===" && \
+    echo "ROCm Version: ${ROCM_VERSION}" && \
+    echo "AMD GPU Version: ${AMDGPU_VERSION}" && \
+    echo "GPU Architectures: ${GPU_ARCHS}" && \
+    echo "ROCm Path: /opt/rocm" && \
+    echo "==================================="
+
 # Install Python packages
 
 # Install micropipenv to deploy packages from Pipfile.lock
