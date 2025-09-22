@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "0a593cc108e5d446847b33637d04ee2a8af42b727b5beb9e1e1be8f6583543ca"
+            "sha256": "cf464aeafa58d0daaf9ef9799e92a2043d37e4335ba4326e95acaaec028aca1b"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -2048,10 +2048,13 @@
             "version": "==4.67.1"
         },
         "training-hub": {
-            "editable": true,
-            "git": "https://github.com/Red-Hat-AI-Innovation-Team/training_hub.git",
+            "hashes": [
+                "sha256:10a5947a215dbdbadc349f047a69d5f2d23aca235cfcf57c428de57e217906ac",
+                "sha256:3b63c405cf8b9bec54b263c088aca422c0fe3c74c90e6f88e1f24c847eaed8cc"
+            ],
+            "index": "pypi",
             "markers": "python_version >= '3.11'",
-            "ref": "8164824934771385f36687a03cb338068628953d"
+            "version": "==0.2.0"
         },
         "transformers": {
             "hashes": [
