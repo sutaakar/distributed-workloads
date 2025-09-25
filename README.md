@@ -16,6 +16,7 @@
 
 * Installed Go 1.21
 
+
 ### Common environment variables
 
 * `TEST_OUTPUT_DIR` - Output directory for test logs
