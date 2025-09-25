@@ -143,7 +143,7 @@ jobs:
           echo "No commits were successfully cherry-picked"
           exit 1
         fi
-        
+
         # Push the branch
         git push origin "$BRANCH_NAME"
         
