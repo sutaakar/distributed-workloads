@@ -1,0 +1,246 @@
+# This workflow automatically cherry-picks new commits from main to stable branch
+# It runs hourly and can be triggered manually
+#
+# SETUP REQUIRED:
+# This workflow requires a Personal Access Token (PAT) to create pull requests.
+# 1. Go to GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)
+# 2. Generate a new token with 'repo' scope
+# 3. Add it as a repository secret named 'GATING_TOKEN'
+
+name: Auto Cherry-pick to Stable
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  lake-gate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GATING_TOKEN }}
+
+    - name: Configure Git
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Check for differences between main and stable
+      id: check-diff
+      run: |
+        # Ensure we have the latest refs
+        git fetch origin main
+        git fetch origin stable || {
+          echo "Error: stable branch doesn't exist. Please create the stable branch first."
+          exit 1
+        }
+        
+        # Update local refs to match remote
+        git checkout main
+        git reset --hard origin/main
+        git checkout -B stable origin/stable
+
+        # Get commits that are in main but not in stable
+        NEW_COMMITS=$(git rev-list stable..main --reverse)
+        
+        if [ -z "$NEW_COMMITS" ]; then
+          echo "No new commits to cherry-pick"
+          echo "new_commits=" >> $GITHUB_OUTPUT
+        else
+          echo "Found new commits to cherry-pick:"
+          echo "$NEW_COMMITS"
+          # Store commits as a single line with spaces
+          COMMITS_LINE=$(echo "$NEW_COMMITS" | tr '\n' ' ' | sed 's/ $//')
+          echo "new_commits=$COMMITS_LINE" >> $GITHUB_OUTPUT
+          
+          # Get the latest commit hash for PR title
+          LATEST_COMMIT=$(echo "$NEW_COMMITS" | tail -n1)
+          LATEST_COMMIT_SHORT=$(git rev-parse --short "$LATEST_COMMIT")
+          LATEST_COMMIT_MSG=$(git log --format=%s -n 1 "$LATEST_COMMIT")
+          echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+          echo "latest_commit_short=$LATEST_COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "latest_commit_msg=$LATEST_COMMIT_MSG" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check for existing cherry-pick PRs
+      id: check-existing-pr
+      if: steps.check-diff.outputs.new_commits != ''
+      run: |
+        # Look for existing PRs with the cherry-pick label
+        EXISTING_PR_DATA=$(gh pr list --base stable --label "lake-gate" --state open --json number,headRefName,title | jq -r '.[0] // empty')
+        
+        if [ -n "$EXISTING_PR_DATA" ] && [ "$EXISTING_PR_DATA" != "null" ]; then
+          EXISTING_PR_NUMBER=$(echo "$EXISTING_PR_DATA" | jq -r '.number')
+          EXISTING_PR_BRANCH=$(echo "$EXISTING_PR_DATA" | jq -r '.headRefName')
+          echo "Found existing PR: #$EXISTING_PR_NUMBER (branch: $EXISTING_PR_BRANCH)"
+          echo "existing_pr_number=$EXISTING_PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "existing_pr_branch=$EXISTING_PR_BRANCH" >> $GITHUB_OUTPUT
+          
+          # Check if the existing PR already contains the latest commit
+          PR_TITLE=$(echo "$EXISTING_PR_DATA" | jq -r '.title')
+          LATEST_COMMIT_SHORT="${{ steps.check-diff.outputs.latest_commit_short }}"
+          
+          if echo "$PR_TITLE" | grep -q "$LATEST_COMMIT_SHORT"; then
+            echo "Existing PR already contains the latest commit"
+            echo "pr_up_to_date=true" >> $GITHUB_OUTPUT
+          else
+            echo "Existing PR is outdated"
+            echo "pr_up_to_date=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "No existing cherry-pick PR found"
+          echo "existing_pr_number=" >> $GITHUB_OUTPUT
+          echo "existing_pr_branch=" >> $GITHUB_OUTPUT
+          echo "pr_up_to_date=false" >> $GITHUB_OUTPUT
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GATING_TOKEN }}
+
+    - name: Close outdated PR and delete branch
+      if: steps.check-diff.outputs.new_commits != '' && steps.check-existing-pr.outputs.existing_pr_number != '' && steps.check-existing-pr.outputs.pr_up_to_date == 'false'
+      run: |
+        PR_NUMBER="${{ steps.check-existing-pr.outputs.existing_pr_number }}"
+        BRANCH_NAME="${{ steps.check-existing-pr.outputs.existing_pr_branch }}"
+        
+        echo "Closing outdated PR #$PR_NUMBER (branch: $BRANCH_NAME)"
+        gh pr close "$PR_NUMBER" --comment "Closing this PR as newer commits are available. A new PR will be created automatically."
+        
+        # Delete the temporary branch
+        if [ -n "$BRANCH_NAME" ]; then
+          echo "Deleting temporary branch: $BRANCH_NAME"
+          git push origin --delete "$BRANCH_NAME" || {
+            echo "Warning: Failed to delete branch $BRANCH_NAME (it may have already been deleted)"
+          }
+        else
+          echo "Warning: No branch name found for PR #$PR_NUMBER"
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GATING_TOKEN }}
+
+    - name: Create cherry-pick branch and PR
+      if: steps.check-diff.outputs.new_commits != '' && steps.check-existing-pr.outputs.pr_up_to_date == 'false'
+      run: |
+        # Create a unique branch name with timestamp
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        BRANCH_NAME="lake-gate-$TIMESTAMP"
+        
+        echo "Creating branch: $BRANCH_NAME"
+        git checkout stable
+        git checkout -b "$BRANCH_NAME"
+        
+        # Cherry-pick all new commits
+        COMMITS="${{ steps.check-diff.outputs.new_commits }}"
+        FAILED_COMMITS=""
+        SUCCESS_COUNT=0
+        
+        for commit in $COMMITS; do
+          echo "Cherry-picking commit: $commit"
+          if git cherry-pick "$commit"; then
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            echo "✓ Successfully cherry-picked $commit"
+          else
+            echo "✗ Failed to cherry-pick $commit"
+            FAILED_COMMITS="$FAILED_COMMITS $commit"
+            # Abort the cherry-pick to clean up
+            git cherry-pick --abort
+          fi
+        done
+        
+        if [ $SUCCESS_COUNT -eq 0 ]; then
+          echo "No commits were successfully cherry-picked"
+          exit 1
+        fi
+
+        # Push the branch
+        git push origin "$BRANCH_NAME"
+        
+        # Prepare PR body
+        LATEST_COMMIT="${{ steps.check-diff.outputs.latest_commit }}"
+        LATEST_COMMIT_SHORT="${{ steps.check-diff.outputs.latest_commit_short }}"
+        COMMIT_COUNT=$(echo "$COMMITS" | wc -w)
+        
+        # Check if any commits contain changes to runtime images
+        RUNTIME_CHANGES=false
+        for commit in $COMMITS; do
+          if git diff-tree --no-commit-id --name-only -r "$commit" | grep -q "^images/runtime/"; then
+            RUNTIME_CHANGES=true
+            break
+          fi
+        done
+
+        # Build PR body using here document
+        PR_BODY=$(cat << EOF
+        ## Automated Cherry-pick from main to stable
+
+        This PR automatically cherry-picks $COMMIT_COUNT commit(s) from the \`main\` branch to the \`stable\` branch.
+
+        **Latest commit:** $LATEST_COMMIT_SHORT - ${{ steps.check-diff.outputs.latest_commit_msg }}
+
+        ## Pre-merge Checklist
+
+        Before merging this PR, please ensure the following tasks are completed:
+
+        - [ ] **Conflict Resolution**: Any merge conflicts have been resolved
+        - [ ] **PR checks**: Pr checks passed
+        EOF
+        )
+        
+        # Add integration test requirement if runtime images changed
+        if [ "$RUNTIME_CHANGES" = true ]; then
+          PR_BODY="$PR_BODY"$'\n'"- [ ] **Integration Tests**: Run Jenkins integration tests on CUDA or ROCm OCP cluster (runtime image changes detected)"
+        fi
+
+        PR_BODY="$PR_BODY"$'\n\n'"### Cherry-picked commits:"
+
+        for commit in $COMMITS; do
+          COMMIT_SHORT=$(git rev-parse --short "$commit")
+          COMMIT_MSG=$(git log --format=%s -n 1 "$commit")
+          PR_BODY="$PR_BODY"$'\n'"- $COMMIT_SHORT: $COMMIT_MSG"
+        done
+        
+        if [ -n "$FAILED_COMMITS" ]; then
+          PR_BODY="$PR_BODY"$'\n\n'"### ⚠️ Failed cherry-picks:"$'\n'"The following commits could not be cherry-picked automatically due to conflicts:"
+          for commit in $FAILED_COMMITS; do
+            COMMIT_SHORT=$(git rev-parse --short "$commit")
+            COMMIT_MSG=$(git log --format=%s -n 1 "$commit")
+            PR_BODY="$PR_BODY"$'\n'"- $COMMIT_SHORT: $COMMIT_MSG"
+          done
+          
+          PR_BODY="$PR_BODY"$'\n\n'"Please review and manually resolve these conflicts if needed."
+        fi
+        
+        PR_BODY="$PR_BODY"$'\n\n'"---"$'\n'"*This PR was created automatically by the lake-gate workflow.*"
+        
+        # Create the PR
+        PR_TITLE="Auto cherry-pick to stable (up to $LATEST_COMMIT_SHORT)"
+        
+        gh pr create \
+          --title "$PR_TITLE" \
+          --body "$PR_BODY" \
+          --base stable \
+          --head "$BRANCH_NAME" \
+          --label "lake-gate"
+        
+        echo "Created PR: $PR_TITLE"
+      env:
+        GH_TOKEN: ${{ secrets.GATING_TOKEN }}
+
+    - name: Summary
+      run: |
+        if [ -z "${{ steps.check-diff.outputs.new_commits }}" ]; then
+          echo "✅ No new commits to cherry-pick. Stable branch is up to date."
+        elif [ "${{ steps.check-existing-pr.outputs.pr_up_to_date }}" == "true" ]; then
+          echo "✅ Existing PR already contains the latest commits. No action needed."
+        else
+          echo "✅ Cherry-pick process completed. New PR created or existing PR updated."
+        fi
