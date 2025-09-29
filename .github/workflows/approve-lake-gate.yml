@@ -9,6 +9,9 @@ on:
   issue_comment:
     types: [created]
 
+env:
+  TEAM_SLUG: "distributed-workloads-gate-approvers"
+
 permissions:
   contents: write
   pull-requests: write
@@ -16,9 +19,38 @@ permissions:
 jobs:
   approve-lake-gate:
     runs-on: ubuntu-latest
-    if: github.event.issue.pull_request && contains(github.event.comment.body, '/approve') && contains(github.event.issue.labels.*.name, 'lake-gate') && github.event.comment.author_association == 'OWNER'
-    
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/approve') && contains(github.event.issue.labels.*.name, 'lake-gate')
+
     steps:
+    - name: Check team membership
+      id: check-team
+      run: |
+        set -euo pipefail
+
+        ORG_NAME="${{ github.repository_owner }}"
+        COMMENT_AUTHOR="${{ github.event.comment.user.login }}"
+
+        echo "Checking if user $COMMENT_AUTHOR is a member of team $TEAM_SLUG in organization $ORG_NAME"
+
+        # Check if user is repository owner
+        if [ "${{ github.event.comment.author_association }}" = "OWNER" ]; then
+          echo "User is repository owner - access granted"
+          exit 0
+        fi
+
+        # Check team membership using GitHub CLI
+        if gh api "orgs/$ORG_NAME/teams/$TEAM_SLUG/memberships/$COMMENT_AUTHOR" --silent 2>/dev/null; then
+          echo "User $COMMENT_AUTHOR is a member of team $TEAM_SLUG - access granted"
+        else
+          echo "User $COMMENT_AUTHOR is not a member of team $TEAM_SLUG or team does not exist - access denied"
+
+          # Post comment explaining the restriction
+          gh pr comment "${{ github.event.issue.number }}" --body "❌ Access denied: Only repository owners and members of the \`$TEAM_SLUG\` team can approve lake-gate PRs."
+          exit 1
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
