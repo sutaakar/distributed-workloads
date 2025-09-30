@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir --upgrade requests==2.32.3
 # Install CUDA
 WORKDIR /opt/app-root/bin
 
+
 # Ref: https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/
 ENV CUDA_VERSION=12.8.0 \
     NVIDIA_REQUIRE_CUDA="cuda>=12.8 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526 brand=tesla,driver>=570,driver<571 brand=unknown,driver>=570,driver<571 brand=nvidia,driver>=570,driver<571 brand=nvidiartx,driver>=570,driver<571 brand=geforce,driver>=570,driver<571 brand=geforcertx,driver>=570,driver<571 brand=quadro,driver>=570,driver<571 brand=quadrortx,driver>=570,driver<571 brand=titan,driver>=570,driver<571 brand=titanrtx,driver>=570,driver<571" \
@@ -81,10 +82,6 @@ RUN micropipenv install -- --no-cache-dir && \
     # Fix permissions to support pip in OpenShift environments \
     chmod -R g+w /opt/app-root/lib/python3.12/site-packages && \
     fix-permissions /opt/app-root -P
-
-# Install Flash Attention
-RUN pip install wheel
-RUN pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation
 
 # Upgrade NCCL to a more recent version and add Training Hub NVIDIA dependencies
 RUN pip install \
