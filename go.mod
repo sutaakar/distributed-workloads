@@ -4,7 +4,7 @@ go 1.24.6
 
 toolchain go1.24.11
 
-// Remove replace when Training operator v1 tests are removed
+// Remove replace when Training operator v1 tests are removedx
 replace (
 	github.com/kubeflow/training-operator => github.com/kubeflow/training-operator v1.7.0
 	sigs.k8s.io/kueue => sigs.k8s.io/kueue v0.6.2

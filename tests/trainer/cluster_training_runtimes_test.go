@@ -41,7 +41,7 @@ func TestDefaultClusterTrainingRuntimes(t *testing.T) {
 	// Build a map of expected runtimes for quick lookup
 	expectedRuntimeMap := make(map[string]trainerutils.ClusterTrainingRuntime)
 	for _, runtime := range trainerutils.ExpectedRuntimes {
-		expectedRuntimeMap[runtime.Name] = runtime
+		expecttedRuntimeMap[runtime.Name] = runtime
 	}
 
 	// List all ClusterTrainingRuntimes from the cluster
