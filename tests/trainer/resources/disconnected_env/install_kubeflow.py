@@ -48,6 +48,10 @@ def get_rhai_pypi_index() -> str:
     - CUDA: https://console.redhat.com/api/pypi/public-rhai/rhoai/3.4-EA2/cuda12.9-ubi9/simple/
     - ROCm: https://console.redhat.com/api/pypi/public-rhai/rhoai/3.4-EA2/rocm6.4-ubi9/simple/
     """
+    custom_index = os.environ.get("KUBEFLOW_PYPI_INDEX_URL")
+    if custom_index:
+        return custom_index
+
     gpu_type = os.environ.get("GPU_TYPE", "cpu").lower()
     base = "https://console.redhat.com/api/pypi/public-rhai/rhoai/3.4-EA2"
     

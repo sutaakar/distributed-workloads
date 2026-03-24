@@ -63,7 +63,7 @@ func RunOsftTrainingHubMultiGpuDistributedTraining(t *testing.T) {
 
 	cm := support.CreateConfigMap(test, namespace.Name, map[string][]byte{
 		osftNotebookName:      nb,
-		"install_kubeflow.py": installScript,
+		installKubeflowScript: installScript,
 	})
 
 	// Build command with parameters and pinned deps, and print definitive status line to logs
@@ -90,6 +90,7 @@ func RunOsftTrainingHubMultiGpuDistributedTraining(t *testing.T) {
 		support.StorageClassName(storageClass.Name),
 	)
 
+	sdkInstallExports := buildKubeflowInstallExports()
 	shellCmd := fmt.Sprintf(
 		"set -e; "+
 			"export IPYTHONDIR='/tmp/.ipython'; "+
@@ -102,13 +103,16 @@ func RunOsftTrainingHubMultiGpuDistributedTraining(t *testing.T) {
 			"export AWS_STORAGE_BUCKET_OSFT_DIR='%s'; "+
 			"export TRAINING_RUNTIME='%s'; "+
 			"export GPU_TYPE='nvidia'; "+
+			"%s"+
 			"python -m pip install --quiet --no-cache-dir --break-system-packages ipykernel papermill boto3==1.34.162 && "+
-			"python /opt/app-root/notebooks/install_kubeflow.py && "+
+			"python /opt/app-root/notebooks/%s && "+
 			"if python -m papermill -k python3 /opt/app-root/notebooks/%s /opt/app-root/src/out.ipynb --log-output; "+
 			"then echo 'NOTEBOOK_STATUS: SUCCESS'; else echo 'NOTEBOOK_STATUS: FAILURE'; fi; sleep infinity",
 		support.GetOpenShiftApiUrl(test), userToken, namespace.Name, rwxPvc.Name,
 		endpoint, accessKey, secretKey, bucket, prefix,
 		trainerutils.DefaultTrainingHubRuntimeCUDA,
+		sdkInstallExports,
+		installKubeflowScript,
 		osftNotebookName,
 	)
 	command := []string{"/bin/sh", "-c", shellCmd}
