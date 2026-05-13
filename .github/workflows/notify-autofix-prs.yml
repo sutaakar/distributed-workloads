@@ -13,7 +13,7 @@ jobs:
       contents: read
     if: >-
       github.event_name == 'pull_request_target' &&
-      github.event.pull_request.user.login == 'jira-autofix-bot'
+      github.event.pull_request.user.login == 'jira-autofix[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Post new autofix PR to Slack
@@ -63,7 +63,7 @@ jobs:
 
           prs=$(gh pr list \
             --repo "$GITHUB_REPOSITORY" \
-            --author jira-autofix-bot \
+            --author app/jira-autofix \
             --state open \
             --json number,title,url,createdAt \
             --jq '.[] | "\(.number)\t\(.title)\t\(.url)\t\(.createdAt)"')
