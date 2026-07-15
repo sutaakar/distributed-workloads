@@ -1,0 +1,261 @@
+name: Universal Image Lockfile Refresh
+
+on:
+  schedule:
+    # Daily 6:00 UTC (morning CET/CEST) — transitive dep refresh
+    - cron: "0 6 * * *"
+    # Monday 6:30 UTC — direct dep bump (pyproject.toml constraints)
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Refresh mode"
+        type: choice
+        options:
+          - transitive
+          - direct
+        default: transitive
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: universal-lockfile-refresh-${{ github.ref }}-${{ github.event.schedule || inputs.mode || 'manual' }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-lockfiles:
+    runs-on: ubuntu-latest
+    env:
+      IMAGES_DIR: images/universal/training
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Determine mode
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          DISPATCH_MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "mode=$DISPATCH_MODE" >> "$GITHUB_OUTPUT"
+          elif [ "$SCHEDULE" = "30 6 * * 1" ]; then
+            echo "mode=direct" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=transitive" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump direct dependencies (pyproject.toml)
+        if: steps.mode.outputs.mode == 'direct'
+        run: |
+          set -euo pipefail
+
+          for dir in "$IMAGES_DIR"/th*/; do
+            [ -f "$dir/pyproject.toml" ] || continue
+            [ -f "$dir/Dockerfile" ] || continue
+
+            flavor=$(basename "$dir")
+            echo "::group::$flavor — bump pyproject.toml"
+
+            # Read index URL from Dockerfile (source of truth for builds)
+            index_url=$(grep -oP '(?<=--index-url=)\S+' "$dir/Dockerfile" | head -1)
+
+            python3 - "$dir/pyproject.toml" "$index_url" <<'PYEOF'
+          import re, sys, urllib.request, html.parser
+
+          pyproject_path, index_url = sys.argv[1], sys.argv[2]
+
+          class LinkParser(html.parser.HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.versions = []
+              def handle_starttag(self, tag, attrs):
+                  if tag == "a":
+                      for _, v in attrs:
+                          if not v:
+                              continue
+                          # Match wheel filenames: pkg-1.2.3-cp312-...
+                          m = re.search(r"-(\d+[\d.]*\d+(?:\+[^-]+)?)(?:-\d+)?(?:-cp|-py)", v)
+                          if not m:
+                              # Match sdist filenames: pkg-1.2.3.tar.gz
+                              m = re.search(r"-(\d+[\d.]*\d+(?:\+[^-]+)?)\.tar\.gz", v)
+                          if m:
+                              self.versions.append(m.group(1))
+
+          def latest_from_index(pkg, index_url):
+              norm = re.sub(r"[-_.]+", "-", pkg).lower()
+              url = f"{index_url.rstrip('/')}/{norm}/"
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      p = LinkParser()
+                      p.feed(r.read().decode())
+                      if not p.versions:
+                          return None
+                      from packaging.version import Version
+                      return str(max(p.versions, key=Version))
+              except Exception as e:
+                  print(f"  WARNING: failed to query index for {pkg}: {e}", file=sys.stderr)
+                  return None
+
+          content = open(pyproject_path).read()
+          changed = False
+
+          for m in re.finditer(r'^(\s+")([\w_-]+)((?:~=|==)\d+\.\d+\.\d+[^"]*?)(")', content, re.MULTILINE):
+              indent, pkg, constraint, quote = m.groups()
+              op = "~=" if constraint.startswith("~=") else "=="
+              current = constraint.lstrip("~=")
+              latest = latest_from_index(pkg, index_url)
+              if not latest:
+                  continue
+              from packaging.version import Version
+              if Version(latest) <= Version(current):
+                  continue
+              new_constraint = f"{op}{latest}"
+              content = content[:m.start()] + f"{indent}{pkg}{new_constraint}{quote}" + content[m.end():]
+              print(f"  {pkg}: {constraint} -> {new_constraint}")
+              changed = True
+
+          if changed:
+              open(pyproject_path, "w").write(content)
+          else:
+              print("  No updates available")
+          PYEOF
+
+            echo "::endgroup::"
+          done
+
+      - name: Refresh lockfiles
+        run: |
+          set -euo pipefail
+
+          changed=0
+
+          for dir in "$IMAGES_DIR"/th*/; do
+            [ -f "$dir/pyproject.toml" ] || continue
+            [ -f "$dir/requirements.txt" ] || continue
+
+            flavor=$(basename "$dir")
+            echo "::group::$flavor — compile requirements.txt"
+
+            index_url_line=$(head -1 "$dir/requirements.txt")
+            index_url="${index_url_line#--index-url=}"
+
+            py_raw=$(echo "$flavor" | grep -oP 'py\K\d+')
+            py_version="${py_raw:0:1}.${py_raw:1}"
+
+            uv pip compile \
+              --upgrade \
+              --python-platform=linux \
+              "--python-version=$py_version" \
+              --index-strategy=unsafe-best-match \
+              "--index-url=$index_url" \
+              -o "$dir/requirements.txt" \
+              "$dir/pyproject.toml"
+
+            # Restore --index-url first line (uv pip compile does not emit it)
+            if ! head -1 "$dir/requirements.txt" | grep -q "^--index-url="; then
+              sed -i "1i\\$index_url_line" "$dir/requirements.txt"
+            fi
+
+            if git diff --quiet -- "$dir/"; then
+              echo "No changes for $flavor"
+            else
+              echo "Changes detected for $flavor"
+              changed=1
+            fi
+
+            echo "::endgroup::"
+          done
+
+          echo "changed=$changed" >> "$GITHUB_ENV"
+
+      - name: Check for existing lockfile PR
+        if: env.changed == '1'
+        id: check_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          LABEL="automated-lockfile-update-${MODE}"
+          PR_LIST=$(gh pr list --label "$LABEL" --state open --json number,headRefName)
+
+          if [ "$PR_LIST" = "[]" ]; then
+            echo "No existing PR found"
+            echo "pr_exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_NUMBER=$(echo "$PR_LIST" | jq -r '.[0].number')
+          PR_BRANCH=$(echo "$PR_LIST" | jq -r '.[0].headRefName')
+          echo "Found existing PR #${PR_NUMBER} on branch ${PR_BRANCH}"
+          echo "pr_exists=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "pr_branch=${PR_BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Close outdated PR
+        if: env.changed == '1' && steps.check_pr.outputs.pr_exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.check_pr.outputs.pr_number }}
+          PR_BRANCH: ${{ steps.check_pr.outputs.pr_branch }}
+        run: |
+          echo "Closing outdated PR #${PR_NUMBER}"
+          gh pr close "$PR_NUMBER" --comment "Superseded by a newer lockfile refresh run."
+
+          if [[ "$PR_BRANCH" =~ ^universal-(transitive|direct)-update- ]]; then
+            git push origin --delete "$PR_BRANCH" || true
+          fi
+
+      - name: Create pull request
+        if: env.changed == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          branch="universal-${MODE}-update-$(date -u +%Y%m%d-%H%M)"
+          git checkout -b "$branch"
+
+          if [ "$MODE" = "direct" ]; then
+            git add "$IMAGES_DIR"/th*/pyproject.toml "$IMAGES_DIR"/th*/requirements.txt
+            title="chore: bump universal image direct dependencies"
+            label="automated-lockfile-update-direct"
+            body="Bumped direct dependency constraints in \`pyproject.toml\` to latest versions
+          available in the AIPCC index and regenerated \`requirements.txt\`.
+
+          > Created automatically by the weekly direct dependency bump workflow.
+          > Review version changes carefully before merging."
+          else
+            git add "$IMAGES_DIR"/th*/requirements.txt
+            title="chore: refresh universal image transitive dependencies"
+            label="automated-lockfile-update-transitive"
+            body="Regenerated \`requirements.txt\` using \`uv pip compile --upgrade\`
+          against the AIPCC index (no \`pyproject.toml\` constraint changes).
+
+          > Created automatically by the daily lockfile refresh workflow."
+          fi
+
+          # Skip if only comment/timestamp changes
+          if git diff --cached --quiet -I '^#'; then
+            echo "Only comment changes detected, skipping PR"
+            exit 0
+          fi
+
+          git commit -m "$title"
+          git push origin "$branch"
+
+          # Ensure label exists
+          gh label create "$label" --description "Automated lockfile update" --color "0E8A16" 2>/dev/null || true
+
+          gh pr create --title "$title" --body "$body" --label "$label"
