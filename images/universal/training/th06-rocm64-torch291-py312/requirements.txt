@@ -195,7 +195,7 @@ hf-transfer==0.1.9
     # via
     #   unsloth
     #   unsloth-zoo
-hf-xet==1.4.3
+hf-xet==1.5.2
     # via huggingface-hub
 hjson==3.1.0
     # via deepspeed
@@ -457,7 +457,7 @@ pyarrow==23.0.1
     #   datasets
     #   mlflow
     #   pyspark-connect
-pyasn1==0.6.3
+pyasn1==0.6.4
     # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
