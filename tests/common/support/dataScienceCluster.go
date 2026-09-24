@@ -306,20 +306,28 @@ func CreateDynamicClient() (dynamic.Interface, error) {
 	return dynamicClient, nil
 }
 
-func CaptureComponentState(dscName, component string) string {
+// CaptureComponentState returns the component management state, whether the
+// DataScienceCluster exists, and any error encountered while reading it.
+func CaptureComponentState(dscName, component string) (state string, exists bool, err error) {
 	dynamicClient, err := CreateDynamicClient()
 	if err != nil {
-		fmt.Printf("Warning: %v\n", err)
-		return ""
+		return "", false, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
 	dsc, err := dynamicClient.Resource(DscGVR).Get(context.Background(), dscName, metav1.GetOptions{})
 	if err != nil {
-		fmt.Printf("Warning: Failed to get DSC: %v\n", err)
-		return ""
+		if apierrors.IsNotFound(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("failed to get DataScienceCluster %s: %w", dscName, err)
 	}
 
-	return ComponentStatusManagementState(dsc, component)
+	state := ComponentStatusManagementState(dsc, component)
+	if state == "" {
+		return "", true, fmt.Errorf("managementState for DataScienceCluster component %s is not set", component)
+	}
+
+	return state, true, nil
 }
 
 func SetupComponent(dscName, component, desiredState string) error {

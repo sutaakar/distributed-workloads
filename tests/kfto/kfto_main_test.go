@@ -24,15 +24,25 @@ import (
 	. "github.com/opendatahub-io/distributed-workloads/tests/common/support"
 )
 
-var initialKueueState string
+var (
+	initialKueueState string
+	dscInstalled      bool
+)
 
 func TestMain(m *testing.M) {
-	initialKueueState = CaptureComponentState(DefaultDSCName, "kueue")
+	var err error
+	initialKueueState, dscInstalled, err = CaptureComponentState(DefaultDSCName, "kueue")
+	if err != nil {
+		fmt.Printf("Failed to determine initial Kueue state: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("Initial Kueue managementState: %s\n", initialKueueState)
 
 	code := m.Run()
 
-	if initialKueueState != "Unmanaged" {
+	if !dscInstalled {
+		fmt.Println("TearDown: Skipping Kueue teardown because no DataScienceCluster is installed")
+	} else if initialKueueState != "Unmanaged" {
 		if err := TearDownComponent(DefaultDSCName, "kueue"); err != nil {
 			fmt.Printf("TearDown: Failed to set Kueue to Removed: %v\n", err)
 		}
