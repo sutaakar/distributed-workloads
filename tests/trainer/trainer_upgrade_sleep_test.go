@@ -118,3 +118,4 @@ func sleepPodRestartCount(pod corev1.Pod) int {
 func podPhase(pod corev1.Pod) corev1.PodPhase {
 	return pod.Status.Phase
 }
+
