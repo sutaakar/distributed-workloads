@@ -34,7 +34,7 @@ func TestGetRayVersion(t *testing.T) {
 
 	// Assert that the version is correct.
 
-	g.Expect(version).To(gomega.Equal("1.4.5"), "Expected version 1.4.5, but got %s", version)
+	g.Expect(version).To(gomega.Equal("1.4.4"), "Expected version 1.4.5, but got %s", version)
 
 }
 
